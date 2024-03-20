@@ -1,0 +1,15 @@
+[project]
+name = "fiber_solver"
+version = "0.1"
+requires-python = ">=3.8"
+
+dependencies = [
+#  "ortools",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.scripts]
+fiber_solver = "fiber_solver:solver"
