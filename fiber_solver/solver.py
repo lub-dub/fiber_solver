@@ -8,16 +8,6 @@ import argparse
 
 import tomllib
 
-fiber_solver_defaults = {
-    "threshold": 15,
-    "core_penalty": 600,
-    "max_cost": 4000,
-    "max_chain": 2,
-    "max_chain_core": 2,
-    "min_coupler": 2,
-    "max_coupler": 4,
-}
-
 
 class Connection(object):
     def __init__(self, cores, length):
@@ -119,9 +109,11 @@ class Solver:
 
     def __init__(self, config=None):
         default_config = {
-            "threshold": 15,
+            "slack": 5,
             "core_penalty": 10000,
             "max_cost": 4000,
+            "max_length_multicore": 1.8,
+            "max_length": 5,
             "max_chain": 2,
             "max_chain_core": 2,
             "min_coupler": 2,
@@ -156,17 +148,17 @@ class Solver:
                 self.model.AddLinearConstraint(
                     sum(len(fiber) * self.x[fiber, link] for fiber in fibers),
                     len(link),
-                    int(len(link) * 1.8),
+                    int(len(link) * self.config["max_length_multicore"]),
                 )
             else:
                 self.model.AddLinearConstraint(
-                    sum(len(fiber) * self.x[fiber, link] for fiber in fibers),
+                    sum(len(fiber) * self.x[fiber, link] for fiber in fibers) + self.config["slack"],
                     len(link),
-                    len(link) * 5,
+                    len(link) * self.config["max_length"],
                 )
                 # We alloy a maximum of two fibers to be daisy chained
                 self.model.AddLinearConstraint(
-                    sum(1 * self.x[fiber, link] for fiber in working_fibers), 1, 2
+                    sum(1 * self.x[fiber, link] for fiber in working_fibers), 1, self.config["max_chain"]
                 )
         for link in links:
             for fiber in fibers:
@@ -181,7 +173,7 @@ class Solver:
 
         for link in links:
             # For each link minimize the total fiber count
-            self.model.Minimize(sum(1000000 * self.x[fiber, link] for fiber in fibers))
+            self.model.Minimize(sum(50000 * self.x[fiber, link] for fiber in fibers))
             # Minimize length overrun per link
             self.model.Minimize(
                 sum(len(fiber) * self.x[fiber, link] for fiber in fibers) - len(link)
@@ -189,7 +181,7 @@ class Solver:
 
             # Minimize core count overrun
             self.model.Minimize(
-                sum(100 * fiber.cores * self.x[fiber, link] for fiber in fibers)
+                sum(10000 * fiber.cores * self.x[fiber, link] for fiber in fibers)
             )
 
         # Minimize the total core count over shoot penalty
@@ -222,10 +214,10 @@ class Solver:
 
             couplersize = 1
 
-            if max_core >= 4:
-                couplersize = 4
-            elif max_core >= 2:
-                couplersize = 2
+            if max_core >= self.config["max_coupler"]:
+                couplersize = self.config["max_coupler"]
+            elif max_core >= self.config["min_coupler"]:
+                couplersize = self.config["min_coupler"]
 
             if len(core_list) > 1:
                 coupler_count[couplersize] = coupler_count[couplersize] + (
@@ -245,7 +237,7 @@ class Solver:
             ret += f"cores {key} amount {value}\n"
 
         # minimum coupler size, so if we couple simplex cable but only have duplex couples increase the count
-        min_coupler = 2
+        min_coupler = self.config["min_coupler"]
         for key, value in coupler_count.items():
             if key < min_coupler:
                 coupler_count[key] = coupler_count[min_coupler] + value
@@ -290,7 +282,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.config:
         config = tomllib.load(args.config)
-        print(config)
     # Mark fiber with notes or broken cores/ need repairs as higher
     working_fibers = []
     reader = csv.DictReader(args.fibers, delimiter=",")
