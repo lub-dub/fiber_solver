@@ -115,6 +115,7 @@ class Solver:
             "max_length_multicore": 1.8,
             "max_length": 5,
             "max_chain": 2,
+            "max_cores":24,
             "max_chain_core": 2,
             "min_coupler": 2,
             "max_coupler": 4,
@@ -149,6 +150,11 @@ class Solver:
                     sum(len(fiber) * self.x[fiber, link] for fiber in fibers),
                     len(link),
                     int(len(link) * self.config["max_length_multicore"]),
+                )
+                self.model.AddLinearConstraint(
+                    sum(fiber.cores * self.x[fiber, link] for fiber in fibers),
+                    link.cores,
+                    int(self.config["max_cores"]),
                 )
             else:
                 self.model.AddLinearConstraint(
