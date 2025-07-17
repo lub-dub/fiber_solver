@@ -15,7 +15,7 @@ class Connection(object):
         self.length = round(float(length))
 
     def is_multicore(self):
-        return True if self.cores > 2 else False
+        return True if self.cores > 4 else False
 
     def __eq__(self, other):
         if issubclass(other, Connection):
@@ -113,8 +113,8 @@ class Solver:
             "core_penalty": 10000,
             "max_cost": 4000,
             "max_length_multicore": 1.8,
-            "max_length": 5,
-            "max_chain": 2,
+            "max_length": 3,
+            "max_chain": 1,
             "max_cores":24,
             "max_chain_core": 2,
             "min_coupler": 2,
@@ -135,7 +135,7 @@ class Solver:
         for fiber in fibers:
             for link in links:
                 self.x[fiber, link] = self.model.NewBoolVar(f"x[{fiber},{link}]")
-                if fiber < link:
+                if fiber < len(link) +5 or len(link)*3 > fiber:
                     self.model.Add(self.x[fiber, link] == False)
         # every fiber only once
         for fiber in fibers:
@@ -147,7 +147,7 @@ class Solver:
                 self.model.Add(sum(self.x[fiber, link] for fiber in fibers) == 1)
                 # Search Total length must be the length or 1.8 times more
                 self.model.AddLinearConstraint(
-                    sum(len(fiber) * self.x[fiber, link] for fiber in fibers),
+                    sum(len(fiber) * self.x[fiber, link] for fiber in fibers), 
                     len(link),
                     int(len(link) * self.config["max_length_multicore"]),
                 )
@@ -158,37 +158,28 @@ class Solver:
                 )
             else:
                 self.model.AddLinearConstraint(
-                    sum(len(fiber) * self.x[fiber, link] for fiber in fibers) + self.config["slack"],
-                    len(link),
+                    sum(len(fiber) * self.x[fiber, link] for fiber in fibers),
+                    len(link) + self.config["slack"],
                     len(link) * self.config["max_length"],
+                )
+                self.model.AddLinearConstraint(
+                    sum(fiber.cores * self.x[fiber, link] for fiber in fibers),
+                    link.cores,
+                    int(self.config["max_cores"]),
                 )
                 # We alloy a maximum of two fibers to be daisy chained
                 self.model.AddLinearConstraint(
                     sum(1 * self.x[fiber, link] for fiber in working_fibers), 1, self.config["max_chain"]
                 )
         for link in links:
+            self.objective_terms.append(sum(len(fiber) * self.x[fiber, link] for fiber in fibers) - len(link) + self.config["slack"])
+            self.objective_terms.append(sum(fiber.cores * self.x[fiber, link] for fiber in fibers) - link.cores)
             for fiber in fibers:
                 if not self.costs.get(link):
                     self.costs[link] = dict()
                 self.costs[link][fiber] = self.cost(link, fiber)
                 self.objective_terms.append(self.costs[link][fiber] * self.x[fiber, link])
 
-        self.model.Minimize(
-            sum(1000 * sum(self.x[fiber, link] for fiber in fibers) for link in links)
-        )
-
-        for link in links:
-            # For each link minimize the total fiber count
-            self.model.Minimize(sum(50000 * self.x[fiber, link] for fiber in fibers))
-            # Minimize length overrun per link
-            self.model.Minimize(
-                sum(len(fiber) * self.x[fiber, link] for fiber in fibers) - len(link)
-            )
-
-            # Minimize core count overrun
-            self.model.Minimize(
-                sum(10000 * fiber.cores * self.x[fiber, link] for fiber in fibers)
-            )
 
         # Minimize the total core count over shoot penalty
         self.model.Minimize(sum(self.objective_terms))
@@ -201,7 +192,7 @@ class Solver:
         if self.solver == None:
             return "Not yet solved"
 
-        if self.status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+        if self.status != cp_model.OPTIMAL and self.status != cp_model.FEASIBLE:
             return "No solution"
 
         used_fibers = []
